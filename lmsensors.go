@@ -6,6 +6,7 @@
 
 package lmsensors
 
+// #include <stdlib.h>
 // #include <sensors/sensors.h>
 // #include <sensors/error.h>
 // #cgo LDFLAGS: -lsensors
@@ -16,6 +17,7 @@ import (
 	"math"
 	"strconv"
 	"strings"
+	"unsafe"
 )
 
 // LmSensorType is the type of sensor (eg Temperature or Fan RPM)
@@ -219,10 +221,12 @@ func Get() (*System, error) {
 			break
 		}
 
-		chipNameBuf := strings.Repeat(" ", 256)
-		cchipNameBuf := C.CString(chipNameBuf)
-		C.sensors_snprintf_chip_name(cchipNameBuf, C.ulong(len(chipNameBuf)), cchip)
-		chipName := C.GoString(cchipNameBuf)
+		const buflen = 256
+		chipNameBuf := (*C.char)(C.malloc(buflen))
+		C.sensors_snprintf_chip_name(chipNameBuf, C.ulong(buflen), cchip)
+		chipName := C.GoString(chipNameBuf)
+		C.free(unsafe.Pointer(chipNameBuf))
+
 		nameParts := strings.Split(chipName, "-")
 
 		adapter := C.GoString(C.sensors_get_adapter_name(&cchip.bus))
