@@ -1,6 +1,6 @@
 module github.com/mt-inside/go-lmsensors
 
-go 1.21
+go 1.23.0
 
 require github.com/mt-inside/go-usvc v0.0.7
 

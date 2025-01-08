@@ -35,7 +35,7 @@ var (
 
 func (i LmSensorType) String() string {
 	switch {
-	case 0 <= i && i <= 6:
+	case i <= 6:
 		return _LmSensorType_name_0[_LmSensorType_index_0[i]:_LmSensorType_index_0[i+1]]
 	case 16 <= i && i <= 17:
 		i -= 16
