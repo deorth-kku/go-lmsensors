@@ -168,6 +168,52 @@ func (s *FanSensor) String() string {
 	return fmt.Sprintf("%s: %s%s", s.Name, s.Rendered(), s.Unit())
 }
 
+type CurrentSensor struct {
+	baseSensor
+}
+
+func (s *CurrentSensor) Rendered() string {
+	return strconv.FormatFloat(s.Value, 'f', 2, 64)
+}
+
+func (s *CurrentSensor) Unit() string {
+	return "A"
+}
+
+func (s *CurrentSensor) Alarm() bool {
+	return false
+}
+
+func (s *CurrentSensor) String() string {
+	return fmt.Sprintf("%s: %s%s", s.Name, s.Rendered(), s.Unit())
+}
+
+type IntrusionSensor struct {
+	Name  string
+	Beep  bool
+	alarm bool
+}
+
+func (s *IntrusionSensor) GetName() string {
+	return s.Name
+}
+
+func (s *IntrusionSensor) Rendered() string {
+	return strconv.FormatBool(s.Beep)
+}
+
+func (s *IntrusionSensor) Unit() string {
+	return ""
+}
+
+func (s *IntrusionSensor) Alarm() bool {
+	return s.alarm
+}
+
+func (s *IntrusionSensor) String() string {
+	return fmt.Sprintf("%s: %s", s.Name, s.Rendered())
+}
+
 type UnimplementedSensor struct {
 	baseSensor
 
@@ -270,7 +316,7 @@ func (chip ChipPtr) Sensors(yield func(Sensor) bool) {
 		case Temperature:
 			value, err := chip.getSubfeatureValue(feature, C.SENSORS_SUBFEATURE_TEMP_INPUT)
 			if err != nil {
-				break
+				continue
 			}
 			ts := &TempSensor{baseSensor{label, value}, Unknown}
 			reading = ts
@@ -290,6 +336,21 @@ func (chip ChipPtr) Sensors(yield func(Sensor) bool) {
 			if err == nil {
 				reading = &FanSensor{baseSensor{label, value}}
 			}
+
+		case Current:
+			value, err := chip.getSubfeatureValue(feature, C.SENSORS_SUBFEATURE_CURR_INPUT)
+			if err == nil {
+				reading = &CurrentSensor{baseSensor{label, value}}
+			}
+
+		case Intrusion:
+			value, err := chip.getSubfeatureValue(feature, C.SENSORS_SUBFEATURE_INTRUSION_ALARM)
+			if err != nil {
+				continue
+			}
+			is := &IntrusionSensor{label, false, value != 0}
+			value, _ = chip.getSubfeatureValue(feature, C.SENSORS_SUBFEATURE_INTRUSION_BEEP)
+			is.Beep = value != 0
 
 		default:
 			reading = &UnimplementedSensor{baseSensor{Name: label}, sensorType}
