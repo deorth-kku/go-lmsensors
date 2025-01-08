@@ -215,12 +215,7 @@ func Get() (*System, error) {
 	sensors := &System{Chips: map[string]*Chip{}}
 
 	var chipno C.int = 0
-	for {
-		cchip := C.sensors_get_detected_chips(nil, &chipno)
-		if cchip == nil {
-			break
-		}
-
+	for cchip := C.sensors_get_detected_chips(nil, &chipno); cchip != nil; cchip = C.sensors_get_detected_chips(nil, &chipno) {
 		const buflen = 256
 		chipNameBuf := (*C.char)(C.malloc(buflen))
 		C.sensors_snprintf_chip_name(chipNameBuf, C.ulong(buflen), cchip)
@@ -234,11 +229,7 @@ func Get() (*System, error) {
 		chip := &Chip{ID: chipName, Adapter: adapter, Type: nameParts[0], Bus: nameParts[1], Address: nameParts[2], Sensors: map[string]Sensor{}}
 
 		i := C.int(0)
-		for {
-			feature := C.sensors_get_features(cchip, &i)
-			if feature == nil {
-				break
-			}
+		for feature := C.sensors_get_features(cchip, &i); feature != nil; feature = C.sensors_get_features(cchip, &i) {
 			sensorType := LmSensorType(feature._type)
 
 			clabel := C.sensors_get_label(cchip, feature)
@@ -252,37 +243,41 @@ func Get() (*System, error) {
 			switch sensorType {
 			case Temperature:
 				sf := C.sensors_get_subfeature(cchip, feature, C.SENSORS_SUBFEATURE_TEMP_INPUT)
+				if sf == nil {
+					break
+				}
+				value, err := getValue(cchip, sf)
+				if err != nil {
+					break
+				}
+				ts := &TempSensor{baseSensor{label, value}, Unknown}
+				sf = C.sensors_get_subfeature(cchip, feature, C.SENSORS_SUBFEATURE_TEMP_TYPE)
 				if sf != nil {
 					value, err := getValue(cchip, sf)
 					if err == nil {
-						reading = &TempSensor{baseSensor{label, value}, Unknown}
+						ts.TempType = LmTempType(value)
 					}
 				}
-
-				sf = C.sensors_get_subfeature(cchip, feature, C.SENSORS_SUBFEATURE_TEMP_TYPE)
-				if reading != nil && sf != nil {
-					value, err := getValue(cchip, sf)
-					if err == nil {
-						(reading.(*TempSensor)).TempType = LmTempType(int(value))
-					}
-				}
+				reading = ts
 
 			case Voltage:
 				sf := C.sensors_get_subfeature(cchip, feature, C.SENSORS_SUBFEATURE_IN_INPUT)
-				if sf != nil {
-					value, err := getValue(cchip, sf)
-					if err == nil {
-						reading = &VoltageSensor{baseSensor{label, value}}
-					}
+				if sf == nil {
+					break
+				}
+				value, err := getValue(cchip, sf)
+				if err == nil {
+					reading = &VoltageSensor{baseSensor{label, value}}
 				}
 
 			case Fan:
 				sf := C.sensors_get_subfeature(cchip, feature, C.SENSORS_SUBFEATURE_FAN_INPUT)
-				if sf != nil {
-					value, err := getValue(cchip, sf)
-					if err == nil {
-						reading = &FanSensor{baseSensor{label, value}}
-					}
+				if sf == nil {
+					break
+				}
+				value, err := getValue(cchip, sf)
+				if err == nil {
+					reading = &FanSensor{baseSensor{label, value}}
 				}
 
 			default:
@@ -295,6 +290,7 @@ func Get() (*System, error) {
 		}
 
 		sensors.Chips[chip.ID] = chip
+		C.sensors_free_chip_name(cchip)
 	}
 
 	return sensors, nil
