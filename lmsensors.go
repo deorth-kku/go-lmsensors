@@ -257,13 +257,18 @@ func Cleanup() {
 }
 
 // Get fetches all the chips, all their sensors, and all their values.
+// Get returns an error whenever there are any sensors failed to read, while other sensors value would be available in [System].
 func Get() (*System, error) {
 	sys := &System{Chips: make(map[string]*Chip)}
-	for _, chipptr := range chips {
-		chip := chipptr.Chip()
-		sys.Chips[chip.ID] = &chip
-	}
-	return sys, nil
+	return sys, collectError(func(yield func(string, error) bool) {
+		for _, chipptr := range chips {
+			chip, err := chipptr.Chip()
+			sys.Chips[chip.ID] = &chip
+			if err != nil && !yield("chip="+chip.ID, err) {
+				return
+			}
+		}
+	})
 }
 
 type ChipPtr struct {
@@ -302,7 +307,8 @@ func (chip ChipPtr) Adapter() string {
 	return C.GoString(C.sensors_get_adapter_name(&chip.ptr.bus))
 }
 
-func (chip ChipPtr) Chip() Chip {
+// Chip will return an error if any of its sensors failed to read. However, the returned [Chip] struct is still vaild in such case.
+func (chip ChipPtr) Chip() (Chip, error) {
 	ch := Chip{
 		ID:      chip.Name(),
 		Type:    chip.Prefix(),
@@ -311,13 +317,16 @@ func (chip ChipPtr) Chip() Chip {
 		Adapter: chip.Adapter(),
 		Sensors: make(map[string]Sensor),
 	}
-	for _, feat := range chip.Features {
-		reading := feat.Sensor()
-		if reading != nil {
-			ch.Sensors[reading.GetName()] = reading
+	return ch, collectError(func(yield func(string, error) bool) {
+		for _, feat := range chip.Features {
+			reading, err := feat.Sensor()
+			name := feat.Label()
+			if err != nil && !yield("feature="+name, err) {
+				return
+			}
+			ch.Sensors[name] = reading
 		}
-	}
-	return ch
+	})
 }
 
 // Free release the memory for this chip and make it unreadable until [Init] is called again. Call on Free twice will crash the program.
@@ -368,17 +377,6 @@ func (feat Feature) Type() LmSensorType {
 	return LmSensorType(feat.ptr._type)
 }
 
-var ErrSubFeatureNotExist = sensorErr{}
-
-type sensorErr struct {
-	sub  sf.SubFeature
-	cerr C.int
-}
-
-func (s sensorErr) Error() string {
-	return fmt.Sprintf("can't read sensor value: subfeature=%s, error=%d", s.sub, s.cerr)
-}
-
 func (feat Feature) getValue(sf0 *C.struct_sensors_subfeature) (float64, error) {
 	var val C.double
 	cerr := C.sensors_get_value(feat.Chip.ptr, sf0.number, &val)
@@ -423,11 +421,10 @@ func (feat Feature) Values(yield func(sf.SubFeature, float64) bool) {
 	}
 }
 
-func (feat Feature) Sensor() (reading Sensor) {
+func (feat Feature) Sensor() (reading Sensor, err error) {
 	base := baseSensor{
 		Name: feat.Label(),
 	}
-	var err error
 	_, base.Value, err = feat.FirstValue()
 	if err != nil {
 		return

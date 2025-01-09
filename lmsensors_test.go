@@ -13,7 +13,8 @@ func TestGet(t *testing.T) {
 		t.Error(err)
 		return
 	}
-	info, _ := Get()
+	info, err := Get()
+	fmt.Println(err)
 	encoder := json.NewEncoder(os.Stdout)
 	encoder.SetIndent("", "    ")
 	err = encoder.Encode(info)
