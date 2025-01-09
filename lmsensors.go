@@ -8,7 +8,6 @@ package lmsensors
 
 // #include <stdlib.h>
 // #include <sensors/sensors.h>
-// #include <sensors/error.h>
 // #cgo LDFLAGS: -lsensors
 import "C"
 

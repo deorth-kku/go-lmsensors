@@ -2,6 +2,7 @@ package lmsensors
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"testing"
@@ -14,7 +15,19 @@ func TestGet(t *testing.T) {
 		return
 	}
 	info, err := Get()
-	fmt.Println(err)
+	if err != nil {
+		if !errors.Is(err, ErrSensorAny) {
+			t.Error(err)
+			return
+		}
+		var se SensorErr
+		if !errors.As(err, &se) {
+			t.Error(err)
+			return
+		}
+		fmt.Println(se.Code(), se.SubFeature())
+	}
+
 	encoder := json.NewEncoder(os.Stdout)
 	encoder.SetIndent("", "    ")
 	err = encoder.Encode(info)

@@ -1,26 +1,85 @@
 package lmsensors
 
+// #include <sensors/error.h>
+// #cgo LDFLAGS: -lsensors
+import "C"
 import (
-	"C"
 	"fmt"
+	"iter"
+	"math"
+	"strings"
 
 	sf "github.com/mt-inside/go-lmsensors/subfeature"
 )
-import (
-	"iter"
-	"strings"
+
+type SensorErr interface {
+	error
+	SubFeature() sf.SubFeature
+	Code() SensorErrCode
+}
+
+var (
+	ErrSubFeatureNotExist           = sensorErr{}
+	_                     SensorErr = ErrSubFeatureNotExist
 )
 
-var ErrSubFeatureNotExist = sensorErr{}
-
+// sensorErr is only allowed to create within the package, and cannot be modified.
+// To read its value, you can cast it into [SensorErr]
 type sensorErr struct {
 	sub  sf.SubFeature
 	cerr C.int
 }
 
+func (s sensorErr) SubFeature() sf.SubFeature {
+	return s.sub
+}
+
+func (s sensorErr) Code() SensorErrCode {
+	return SensorErrCode(s.cerr)
+}
+
 func (s sensorErr) Error() string {
 	return fmt.Sprintf("can't read sensor value: subfeature=%s, error=%d", s.sub, s.cerr)
 }
+
+func (s sensorErr) Is(err error) bool {
+	switch code := err.(type) {
+	case SensorErrCode:
+		if code == ErrSensorAny {
+			return true
+		}
+		return code == SensorErrCode(s.cerr)
+	case sf.SubFeature:
+		return code == s.sub
+	case sensorErr:
+		return s == code
+	default:
+		return false
+	}
+}
+
+//go:generate stringer -type=SensorErrCode
+type SensorErrCode int32
+
+func (s SensorErrCode) Error() string {
+	return s.String()
+}
+
+const (
+	ErrSensorWildcards SensorErrCode = -C.SENSORS_ERR_WILDCARDS // Wildcard found in chip name
+	ErrSensorNoEntry   SensorErrCode = -C.SENSORS_ERR_NO_ENTRY  // No such subfeature known
+	ErrSensorAccessR   SensorErrCode = -C.SENSORS_ERR_ACCESS_R  // Can't read
+	ErrSensorKernel    SensorErrCode = -C.SENSORS_ERR_KERNEL    // Kernel interface error
+	ErrSensorDivZero   SensorErrCode = -C.SENSORS_ERR_DIV_ZERO  // Divide by zero
+	ErrSensorChipName  SensorErrCode = -C.SENSORS_ERR_CHIP_NAME // Can't parse chip name
+	ErrSensorBusName   SensorErrCode = -C.SENSORS_ERR_BUS_NAME  // Can't parse bus name
+	ErrSensorParse     SensorErrCode = -C.SENSORS_ERR_PARSE     // General parse error
+	ErrSensorAccessW   SensorErrCode = -C.SENSORS_ERR_ACCESS_W  // Can't write
+	ErrSensorIO        SensorErrCode = -C.SENSORS_ERR_IO        // I/O error
+	ErrSensorRecursion SensorErrCode = -C.SENSORS_ERR_RECURSION // Evaluation recurses too deep
+
+	ErrSensorAny SensorErrCode = math.MaxInt32 // A special case for [sensorErr.Is] to always match
+)
 
 type wrapError struct {
 	msg string

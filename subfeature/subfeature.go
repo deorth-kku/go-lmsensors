@@ -12,6 +12,10 @@ import (
 //go:generate stringer -type=SubFeature
 type SubFeature uint32
 
+func (s SubFeature) Error() string {
+	return s.String()
+}
+
 const (
 	IN_INPUT       SubFeature = C.SENSORS_SUBFEATURE_IN_INPUT
 	IN_MIN         SubFeature = C.SENSORS_SUBFEATURE_IN_MIN
