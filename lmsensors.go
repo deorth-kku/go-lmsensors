@@ -261,7 +261,7 @@ func Cleanup() {
 func Get() (*System, error) {
 	sys := &System{Chips: make(map[string]*Chip)}
 	return sys, collectError(func(yield func(string, error) bool) {
-		for _, chipptr := range chips {
+		for _, chipptr := range Chips {
 			chip, err := chipptr.Chip()
 			sys.Chips[chip.ID] = &chip
 			if err != nil && !yield("chip="+chip.ID, err) {
@@ -279,7 +279,9 @@ func (chip ChipPtr) Name() string {
 	const buflen = 256
 	chipNameBuf := (*C.char)(C.malloc(buflen))
 	defer C.free(unsafe.Pointer(chipNameBuf))
-	C.sensors_snprintf_chip_name(chipNameBuf, C.ulong(buflen), chip.ptr)
+	if C.sensors_snprintf_chip_name(chipNameBuf, C.ulong(buflen), chip.ptr) < 0 {
+		return ""
+	}
 	return C.GoString(chipNameBuf)
 }
 
@@ -307,7 +309,7 @@ func (chip ChipPtr) Adapter() string {
 	return C.GoString(C.sensors_get_adapter_name(&chip.ptr.bus))
 }
 
-// Chip will return an error if any of its sensors failed to read. However, the returned [Chip] struct is still vaild in such case.
+// Chip will return an error if any of its sensors failed to read. However, the returned [Chip] struct is still valid in such case.
 func (chip ChipPtr) Chip() (Chip, error) {
 	ch := Chip{
 		ID:      chip.Name(),
@@ -321,21 +323,15 @@ func (chip ChipPtr) Chip() (Chip, error) {
 		for _, feat := range chip.Features {
 			reading, err := feat.Sensor()
 			name := feat.Label()
+			ch.Sensors[name] = reading
 			if err != nil && !yield("feature="+name, err) {
 				return
 			}
-			ch.Sensors[name] = reading
 		}
 	})
 }
 
-// Free release the memory for this chip and make it unreadable until [Init] is called again. Call on Free twice will crash the program.
-// Call on [Cleanup] after Free on any chip will also crash the program.
-// There is no reason to prefer Free over [Cleanup].
-func (chip ChipPtr) Free() {
-	C.sensors_free_chip_name(chip.ptr)
-}
-
+// Feature is a iterator for range over all features for the chip, and it's the only way to create a valid [Feature] object.
 func (chip ChipPtr) Features(yield func(uint32, Feature) bool) {
 	i := C.int(0)
 	for feature := C.sensors_get_features(chip.ptr, &i); feature != nil; feature = C.sensors_get_features(chip.ptr, &i) {
@@ -345,8 +341,8 @@ func (chip ChipPtr) Features(yield func(uint32, Feature) bool) {
 	}
 }
 
-//go:linkname chips
-func chips(yield func(uint32, ChipPtr) bool) {
+// Chips is a iterator for range over all chips, and it's the only way to create a valid [ChipPtr] object.
+func Chips(yield func(uint32, ChipPtr) bool) {
 	var chipno C.int = 0
 	for cchip := C.sensors_get_detected_chips(nil, &chipno); cchip != nil; cchip = C.sensors_get_detected_chips(nil, &chipno) {
 		if !yield(uint32(chipno), ChipPtr{cchip}) {
@@ -360,10 +356,12 @@ type Feature struct {
 	ptr  *C.struct_sensors_feature
 }
 
+// Name return the original name of a sensor.
 func (feat Feature) Name() string {
 	return C.GoString(feat.ptr.name)
 }
 
+// Label return the labed of a sensor which is set by config file.
 func (feat Feature) Label() string {
 	clabel := C.sensors_get_label(feat.Chip.ptr, feat.ptr)
 	if clabel == nil {
@@ -421,6 +419,7 @@ func (feat Feature) Values(yield func(sf.SubFeature, float64) bool) {
 	}
 }
 
+// Sensor read sensor data into a [Sensor] interface.
 func (feat Feature) Sensor() (reading Sensor, err error) {
 	base := baseSensor{
 		Name: feat.Label(),

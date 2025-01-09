@@ -29,7 +29,7 @@ func TestChip(t *testing.T) {
 		t.Error(err)
 		return
 	}
-	for no, chip := range chips {
+	for no, chip := range Chips {
 		fmt.Println(no, chip.Name(), chip.Path(), chip.Prefix(), chip.Bus(), chip.Addr())
 	}
 }
@@ -40,7 +40,7 @@ func TestFeature(t *testing.T) {
 		t.Error(err)
 		return
 	}
-	for _, chip := range chips {
+	for _, chip := range Chips {
 		for _, feat := range chip.Features {
 			fmt.Println(chip.Name(), chip.Path(), feat.Name(), feat.Label(), feat.Type())
 			for sub, value := range feat.Values {
