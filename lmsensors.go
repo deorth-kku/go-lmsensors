@@ -13,12 +13,14 @@ package lmsensors
 import "C"
 
 import (
-	"errors"
 	"fmt"
 	"math"
 	"strconv"
 	"strings"
 	"unsafe"
+
+	"github.com/mt-inside/go-lmsensors/bus"
+	sf "github.com/mt-inside/go-lmsensors/subfeature"
 )
 
 // LmSensorType is the type of sensor (eg Temperature or Fan RPM)
@@ -215,13 +217,15 @@ func (s *IntrusionSensor) String() string {
 }
 
 type UnimplementedSensor struct {
-	baseSensor
+	Feature
+}
 
-	sensorType LmSensorType
+func (s *UnimplementedSensor) GetName() string {
+	return s.Name()
 }
 
 func (s *UnimplementedSensor) Rendered() string {
-	return strconv.FormatFloat(s.Value, 'f', 2, 64)
+	return "0.00"
 }
 
 func (s *UnimplementedSensor) Unit() string {
@@ -233,7 +237,7 @@ func (s *UnimplementedSensor) Alarm() bool {
 }
 
 func (s *UnimplementedSensor) String() string {
-	return fmt.Sprintf("[UNIMPLEMENTED SENSOR TYPE: %s; name: %s]", s.sensorType, s.Name)
+	return fmt.Sprintf("[UNIMPLEMENTED SENSOR TYPE: %s; name: %s]", s.Type(), s.Name())
 }
 
 // Init initialises the underlying lmsensors library, eg loading its database of sensor names and curves.
@@ -255,113 +259,15 @@ func Cleanup() {
 // Get fetches all the chips, all their sensors, and all their values.
 func Get() (*System, error) {
 	sys := &System{Chips: make(map[string]*Chip)}
-	for chipptr := range chips {
-		chip := &Chip{
-			ID:      chipptr.Name(),
-			Adapter: chipptr.Adapter(),
-			Sensors: make(map[string]Sensor),
-		}
-		nameParts := strings.Split(chip.ID, "-")
-		if len(nameParts) != 3 {
-			return nil, fmt.Errorf("unexpected chip ID: %s", chip.ID)
-		}
-		chip.Type, chip.Bus, chip.Address = nameParts[0], nameParts[1], nameParts[2]
-		for reading := range chipptr.Sensors {
-			chip.Sensors[reading.GetName()] = reading
-		}
+	for _, chipptr := range chips {
+		chip := chipptr.Chip()
+		sys.Chips[chip.ID] = &chip
 	}
 	return sys, nil
 }
 
 type ChipPtr struct {
 	ptr *C.sensors_chip_name
-}
-
-func (chip ChipPtr) getValue(sf *C.struct_sensors_subfeature) (float64, error) {
-	var val C.double
-
-	cerr := C.sensors_get_value(chip.ptr, sf.number, &val)
-	if cerr != 0 {
-		return 0.0, fmt.Errorf("can't read sensor value: chip=%v, subfeature=%v, error=%d", chip, sf, cerr)
-	}
-
-	return float64(val), nil
-}
-
-func (chip ChipPtr) getSubfeatureValue(feature *C.struct_sensors_feature, sub C.sensors_subfeature_type) (float64, error) {
-	sf := C.sensors_get_subfeature(chip.ptr, feature, sub)
-	if sf == nil {
-		return 0, errors.New("subfeature do not exist")
-	}
-	return chip.getValue(sf)
-}
-
-func (chip ChipPtr) getLabel(feature *C.struct_sensors_feature) string {
-	clabel := C.sensors_get_label(chip.ptr, feature)
-	if clabel == nil {
-		return ""
-	}
-	defer C.free(unsafe.Pointer(clabel))
-	return C.GoString(clabel)
-}
-
-func (chip ChipPtr) Sensors(yield func(Sensor) bool) {
-	i := C.int(0)
-	for feature := C.sensors_get_features(chip.ptr, &i); feature != nil; feature = C.sensors_get_features(chip.ptr, &i) {
-		sensorType := LmSensorType(feature._type)
-		label := chip.getLabel(feature)
-
-		var reading Sensor
-		switch sensorType {
-		case Temperature:
-			value, err := chip.getSubfeatureValue(feature, C.SENSORS_SUBFEATURE_TEMP_INPUT)
-			if err != nil {
-				continue
-			}
-			ts := &TempSensor{baseSensor{label, value}, Unknown}
-			reading = ts
-			value, err = chip.getSubfeatureValue(feature, C.SENSORS_SUBFEATURE_TEMP_TYPE)
-			if err == nil {
-				ts.TempType = LmTempType(value)
-			}
-
-		case Voltage:
-			value, err := chip.getSubfeatureValue(feature, C.SENSORS_SUBFEATURE_IN_INPUT)
-			if err == nil {
-				reading = &VoltageSensor{baseSensor{label, value}}
-			}
-
-		case Fan:
-			value, err := chip.getSubfeatureValue(feature, C.SENSORS_SUBFEATURE_FAN_INPUT)
-			if err == nil {
-				reading = &FanSensor{baseSensor{label, value}}
-			}
-
-		case Current:
-			value, err := chip.getSubfeatureValue(feature, C.SENSORS_SUBFEATURE_CURR_INPUT)
-			if err == nil {
-				reading = &CurrentSensor{baseSensor{label, value}}
-			}
-
-		case Intrusion:
-			value, err := chip.getSubfeatureValue(feature, C.SENSORS_SUBFEATURE_INTRUSION_ALARM)
-			if err != nil {
-				continue
-			}
-			is := &IntrusionSensor{label, false, value != 0}
-			value, _ = chip.getSubfeatureValue(feature, C.SENSORS_SUBFEATURE_INTRUSION_BEEP)
-			is.Beep = value != 0
-
-		default:
-			reading = &UnimplementedSensor{baseSensor{Name: label}, sensorType}
-		}
-
-		if reading != nil {
-			if !yield(reading) {
-				return
-			}
-		}
-	}
 }
 
 func (chip ChipPtr) Name() string {
@@ -372,23 +278,180 @@ func (chip ChipPtr) Name() string {
 	return C.GoString(chipNameBuf)
 }
 
+func (chip ChipPtr) Path() string {
+	return C.GoString(chip.ptr.path)
+}
+
+func (chip ChipPtr) Prefix() string {
+	return C.GoString(chip.ptr.prefix)
+}
+
+func (chip ChipPtr) String() string {
+	return chip.Name()
+}
+
+func (chip ChipPtr) Bus() string {
+	return bus.Type(chip.ptr.bus._type).String() + "-" + strconv.FormatInt(int64(chip.ptr.bus.nr), 10)
+}
+
+func (chip ChipPtr) Addr() string {
+	return fmt.Sprintf("0x%04x", chip.ptr.addr)
+}
+
 func (chip ChipPtr) Adapter() string {
 	return C.GoString(C.sensors_get_adapter_name(&chip.ptr.bus))
 }
 
+func (chip ChipPtr) Chip() Chip {
+	ch := Chip{
+		ID:      chip.Name(),
+		Type:    chip.Prefix(),
+		Bus:     chip.Bus(),
+		Address: chip.Addr(),
+		Adapter: chip.Adapter(),
+		Sensors: make(map[string]Sensor),
+	}
+	for _, feat := range chip.Features {
+		reading := feat.Sensor()
+		if reading != nil {
+			ch.Sensors[reading.GetName()] = reading
+		}
+	}
+	return ch
+}
+
 // Free release the memory for this chip and make it unreadable until [Init] is called again. Call on Free twice will crash the program.
 // Call on [Cleanup] after Free on any chip will also crash the program.
-// There is no reason prefer Free over [Cleanup].
+// There is no reason to prefer Free over [Cleanup].
 func (chip ChipPtr) Free() {
 	C.sensors_free_chip_name(chip.ptr)
 }
 
-//go:linkname chips
-func chips(yield func(ChipPtr) bool) {
-	var chipno C.int = 0
-	for cchip := C.sensors_get_detected_chips(nil, &chipno); cchip != nil; cchip = C.sensors_get_detected_chips(nil, &chipno) {
-		if !yield(ChipPtr{cchip}) {
+func (chip ChipPtr) Features(yield func(uint32, Feature) bool) {
+	i := C.int(0)
+	for feature := C.sensors_get_features(chip.ptr, &i); feature != nil; feature = C.sensors_get_features(chip.ptr, &i) {
+		if !yield(uint32(i), Feature{chip, feature}) {
 			return
 		}
 	}
+}
+
+//go:linkname chips
+func chips(yield func(uint32, ChipPtr) bool) {
+	var chipno C.int = 0
+	for cchip := C.sensors_get_detected_chips(nil, &chipno); cchip != nil; cchip = C.sensors_get_detected_chips(nil, &chipno) {
+		if !yield(uint32(chipno), ChipPtr{cchip}) {
+			return
+		}
+	}
+}
+
+type Feature struct {
+	Chip ChipPtr
+	ptr  *C.struct_sensors_feature
+}
+
+func (feat Feature) Name() string {
+	return C.GoString(feat.ptr.name)
+}
+
+func (feat Feature) Label() string {
+	clabel := C.sensors_get_label(feat.Chip.ptr, feat.ptr)
+	if clabel == nil {
+		return ""
+	}
+	defer C.free(unsafe.Pointer(clabel))
+	return C.GoString(clabel)
+}
+
+func (feat Feature) Type() LmSensorType {
+	return LmSensorType(feat.ptr._type)
+}
+
+var ErrSubFeatureNotExist = sensorErr{}
+
+type sensorErr struct {
+	sub  sf.SubFeature
+	cerr C.int
+}
+
+func (s sensorErr) Error() string {
+	return fmt.Sprintf("can't read sensor value: subfeature=%s, error=%d", s.sub, s.cerr)
+}
+
+func (feat Feature) getValue(sf0 *C.struct_sensors_subfeature) (float64, error) {
+	var val C.double
+	cerr := C.sensors_get_value(feat.Chip.ptr, sf0.number, &val)
+	if cerr != 0 {
+		return 0, sensorErr{sf.SubFeature(sf0._type), cerr}
+	}
+	return float64(val), nil
+}
+
+func (feat Feature) GetValue(sub sf.SubFeature) (float64, error) {
+	sf := C.sensors_get_subfeature(feat.Chip.ptr, feat.ptr, C.sensors_subfeature_type(sub))
+	if sf == nil {
+		return 0, ErrSubFeatureNotExist
+	}
+	return feat.getValue(sf)
+}
+
+func (feat Feature) FirstValue() (sub sf.SubFeature, val float64, err error) {
+	i := C.int(0)
+	sf0 := C.sensors_get_all_subfeatures(feat.Chip.ptr, feat.ptr, &i)
+	if sf0 == nil {
+		err = ErrSubFeatureNotExist
+		return
+	}
+	sub = sf.SubFeature(sf0._type)
+	val, err = feat.getValue(sf0)
+	return
+}
+
+func (feat Feature) Values(yield func(sf.SubFeature, float64) bool) {
+	var val float64
+	var err error
+	i := C.int(0)
+	for sf0 := C.sensors_get_all_subfeatures(feat.Chip.ptr, feat.ptr, &i); sf0 != nil; sf0 = C.sensors_get_all_subfeatures(feat.Chip.ptr, feat.ptr, &i) {
+		val, err = feat.getValue(sf0)
+		if err != nil {
+			continue
+		}
+		if !yield(sf.SubFeature(sf0._type), val) {
+			return
+		}
+	}
+}
+
+func (feat Feature) Sensor() (reading Sensor) {
+	base := baseSensor{
+		Name: feat.Label(),
+	}
+	var err error
+	_, base.Value, err = feat.FirstValue()
+	if err != nil {
+		return
+	}
+	switch feat.Type() {
+	case Temperature:
+		ts := &TempSensor{base, Unknown}
+		reading = ts
+		value, err := feat.GetValue(sf.TEMP_TYPE)
+		if err == nil {
+			ts.TempType = LmTempType(value)
+		}
+	case Voltage:
+		reading = &VoltageSensor{base}
+	case Fan:
+		reading = &FanSensor{base}
+	case Current:
+		reading = &CurrentSensor{base}
+	case Intrusion:
+		is := &IntrusionSensor{base.Name, false, base.Value != 0}
+		value, _ := feat.GetValue(sf.INTRUSION_BEEP)
+		is.Beep = value != 0
+	default:
+		reading = &UnimplementedSensor{feat}
+	}
+	return
 }
