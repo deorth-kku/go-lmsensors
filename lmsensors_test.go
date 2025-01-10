@@ -63,3 +63,23 @@ func TestFeature(t *testing.T) {
 		}
 	}
 }
+
+func TestGetChip(t *testing.T) {
+	err := Init()
+	if err != nil {
+		t.Error(err)
+		return
+	}
+	for _, chip := range Chips {
+		nchip, err := getChip(chip.Name())
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		for _, feat := range nchip.Features {
+			for sub, val := range feat.Values {
+				fmt.Println(sub, val)
+			}
+		}
+	}
+}

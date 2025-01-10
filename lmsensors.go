@@ -275,13 +275,7 @@ type ChipPtr struct {
 }
 
 func (chip ChipPtr) Name() string {
-	const buflen = 256
-	chipNameBuf := (*C.char)(C.malloc(buflen))
-	defer C.free(unsafe.Pointer(chipNameBuf))
-	if C.sensors_snprintf_chip_name(chipNameBuf, C.ulong(buflen), chip.ptr) < 0 {
-		return ""
-	}
-	return C.GoString(chipNameBuf)
+	return strings.Join([]string{chip.Prefix(), chip.Bus(), chip.Addr()}, "-")
 }
 
 func (chip ChipPtr) Path() string {
@@ -297,11 +291,26 @@ func (chip ChipPtr) String() string {
 }
 
 func (chip ChipPtr) Bus() string {
-	return bus.Type(chip.ptr.bus._type).String() + "-" + strconv.FormatInt(int64(chip.ptr.bus.nr), 10)
+	bus := strings.ToLower(bus.Type(chip.ptr.bus._type).String())
+	if chip.hasNR() {
+		bus += "-" + strconv.FormatInt(int64(chip.ptr.bus.nr), 10)
+	}
+	return bus
+}
+
+func (chip ChipPtr) addrfmt() string {
+	switch chip.ptr.bus._type {
+	case C.SENSORS_BUS_TYPE_ISA, C.SENSORS_BUS_TYPE_PCI:
+		return "%04x"
+	case C.SENSORS_BUS_TYPE_I2C:
+		return "%02x"
+	default:
+		return "%x"
+	}
 }
 
 func (chip ChipPtr) Addr() string {
-	return fmt.Sprintf("0x%04x", chip.ptr.addr)
+	return fmt.Sprintf(chip.addrfmt(), chip.ptr.addr)
 }
 
 func (chip ChipPtr) Adapter() string {
@@ -342,12 +351,46 @@ func (chip ChipPtr) Features(yield func(uint32, Feature) bool) {
 
 // Chips is a iterator for range over all chips, and it's the only way to create a valid [ChipPtr] object.
 func Chips(yield func(uint32, ChipPtr) bool) {
-	var chipno C.int = 0
+	chipno := C.int(0)
 	for cchip := C.sensors_get_detected_chips(nil, &chipno); cchip != nil; cchip = C.sensors_get_detected_chips(nil, &chipno) {
 		if !yield(uint32(chipno), ChipPtr{cchip}) {
 			return
 		}
 	}
+}
+
+func (chip ChipPtr) hasWildcards() bool {
+	return chip.ptr.prefix == nil ||
+		chip.ptr.bus._type == C.SENSORS_BUS_TYPE_ANY ||
+		chip.ptr.bus.nr == C.SENSORS_BUS_NR_ANY ||
+		chip.ptr.addr == C.SENSORS_CHIP_NAME_ADDR_ANY
+}
+
+func (chip ChipPtr) hasNR() bool {
+	switch chip.ptr.bus._type {
+	case C.SENSORS_BUS_TYPE_I2C, C.SENSORS_BUS_TYPE_SPI, C.SENSORS_BUS_TYPE_HID, C.SENSORS_BUS_TYPE_SCSI:
+		return true
+	default:
+		return false
+	}
+}
+
+// this one is still broken
+func getChip(name string) (ChipPtr, error) {
+	ch := ChipPtr{(*C.sensors_chip_name)(C.malloc(C.sizeof_struct_sensors_chip_name))}
+	cname := C.CString(name)
+	defer C.free(unsafe.Pointer(cname))
+	cerr := C.sensors_parse_chip_name(cname, ch.ptr)
+	if cerr != 0 {
+		return ChipPtr{}, SensorErrCode(cerr)
+	}
+	if !ch.hasNR() {
+		ch.ptr.bus.nr = 0
+	}
+	if ch.hasWildcards() {
+		return ChipPtr{}, ErrSensorWildcards
+	}
+	return ch, nil
 }
 
 type Feature struct {

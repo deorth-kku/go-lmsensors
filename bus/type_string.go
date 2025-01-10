@@ -10,18 +10,19 @@ func _() {
 	var x [1]struct{}
 	_ = x[ANY - -1]
 	_ = x[I2C-0]
-	_ = x[PCI-1]
-	_ = x[SPI-2]
-	_ = x[VIRTUAL-3]
-	_ = x[ACPI-4]
-	_ = x[HID-5]
-	_ = x[MDIO-6]
-	_ = x[SCSI-7]
+	_ = x[ISA-1]
+	_ = x[PCI-2]
+	_ = x[SPI-3]
+	_ = x[VIRTUAL-4]
+	_ = x[ACPI-5]
+	_ = x[HID-6]
+	_ = x[MDIO-7]
+	_ = x[SCSI-8]
 }
 
-const _Type_name = "ANYI2CPCISPIVIRTUALACPIHIDMDIOSCSI"
+const _Type_name = "ANYI2CISAPCISPIVIRTUALACPIHIDMDIOSCSI"
 
-var _Type_index = [...]uint8{0, 3, 6, 9, 12, 19, 23, 26, 30, 34}
+var _Type_index = [...]uint8{0, 3, 6, 9, 12, 15, 22, 26, 29, 33, 37}
 
 func (i Type) String() string {
 	i -= -1
