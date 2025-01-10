@@ -403,8 +403,9 @@ func (chip ChipPtr) searchSetPath() {
 // You need to call [ChipPtr.Free] only if ChipPtr is created from this function.
 func GetChip(name string) (ChipPtr, error) {
 	ch := ChipPtr{new(C.sensors_chip_name)}
-	ch.ptr.prefix = C.CString(name)
-	cerr := C.sensors_parse_chip_name(ch.ptr.prefix, ch.ptr)
+	cname := C.CString(name)
+	defer C.free(unsafe.Pointer(cname))
+	cerr := C.sensors_parse_chip_name(cname, ch.ptr)
 	if cerr != 0 {
 		ch.Free()
 		return ChipPtr{}, SensorErrCode(cerr)
