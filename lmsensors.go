@@ -14,6 +14,8 @@ import "C"
 import (
 	"fmt"
 	"math"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"unsafe"
@@ -339,7 +341,7 @@ func (chip ChipPtr) Chip() (Chip, error) {
 	})
 }
 
-// Feature is a iterator for range over all features for the chip, and it's the only way to create a valid [Feature] object.
+// Feature is an iterator for range over all features for the chip, and it's the only way to create a valid [Feature] object.
 func (chip ChipPtr) Features(yield func(uint32, Feature) bool) {
 	i := C.int(0)
 	for feature := C.sensors_get_features(chip.ptr, &i); feature != nil; feature = C.sensors_get_features(chip.ptr, &i) {
@@ -349,7 +351,7 @@ func (chip ChipPtr) Features(yield func(uint32, Feature) bool) {
 	}
 }
 
-// Chips is a iterator for range over all chips, and it's the only way to create a valid [ChipPtr] object.
+// Chips is an iterator for range over all chips. As they are detected in [Init].
 func Chips(yield func(uint32, ChipPtr) bool) {
 	chipno := C.int(0)
 	for cchip := C.sensors_get_detected_chips(nil, &chipno); cchip != nil; cchip = C.sensors_get_detected_chips(nil, &chipno) {
@@ -375,22 +377,62 @@ func (chip ChipPtr) hasNR() bool {
 	}
 }
 
-// this one is still broken
-func getChip(name string) (ChipPtr, error) {
-	ch := ChipPtr{(*C.sensors_chip_name)(C.malloc(C.sizeof_struct_sensors_chip_name))}
-	cname := C.CString(name)
-	defer C.free(unsafe.Pointer(cname))
-	cerr := C.sensors_parse_chip_name(cname, ch.ptr)
+const hwmon_dir = "/sys/class/hwmon"
+
+func (chip ChipPtr) searchSetPath() {
+	entries, err := os.ReadDir(hwmon_dir)
+	if err != nil {
+		return
+	}
+	prefix := chip.Prefix()
+	for _, e := range entries {
+		p, err := os.ReadFile(filepath.Join(hwmon_dir, e.Name(), "name"))
+		if err != nil || len(p) == 0 {
+			continue
+		}
+		p = p[:len(p)-1]
+		if string(p) == prefix {
+			chip.ptr.path = C.CString(filepath.Join(hwmon_dir, e.Name()))
+			break
+		}
+	}
+}
+
+// GetChip create a [ChipPtr] from a name, as it was definded in https://github.com/lm-sensors/lm-sensors/blob/42f240d2a457834bcbdf4dc8b57237f97b5f5854/lib/data.c#L62
+// However, I prohibit wildcards here because none of the methods allow wildcards.
+// You need to call [ChipPtr.Free] only if ChipPtr is created from this function.
+func GetChip(name string) (ChipPtr, error) {
+	ch := ChipPtr{new(C.sensors_chip_name)}
+	ch.ptr.prefix = C.CString(name)
+	cerr := C.sensors_parse_chip_name(ch.ptr.prefix, ch.ptr)
 	if cerr != 0 {
+		ch.Free()
 		return ChipPtr{}, SensorErrCode(cerr)
 	}
 	if !ch.hasNR() {
 		ch.ptr.bus.nr = 0
 	}
 	if ch.hasWildcards() {
+		ch.Free()
 		return ChipPtr{}, ErrSensorWildcards
 	}
+	ch.searchSetPath()
+	if ch.ptr.path == nil {
+		ch.Free()
+		return ChipPtr{}, ErrSensorChipName
+	}
 	return ch, nil
+}
+
+// Free release the C memory allocated for this [ChipPtr].
+// Only call Free if a [ChipPtr] is created from [GetChip].
+func (chip ChipPtr) Free() {
+	if chip.ptr.path != nil {
+		C.free(unsafe.Pointer(chip.ptr.path))
+	}
+	if chip.ptr.prefix != nil {
+		C.free(unsafe.Pointer(chip.ptr.prefix))
+	}
 }
 
 type Feature struct {
@@ -446,6 +488,17 @@ func (feat Feature) FirstValue() (sub sf.SubFeature, val float64, err error) {
 	return
 }
 
+// SubFeatures is an iterator for range over all subfeatures without reading it's value.
+func (feat Feature) SubFeatures(yield func(sf.SubFeature) bool) {
+	i := C.int(0)
+	for sf0 := C.sensors_get_all_subfeatures(feat.Chip.ptr, feat.ptr, &i); sf0 != nil; sf0 = C.sensors_get_all_subfeatures(feat.Chip.ptr, feat.ptr, &i) {
+		if !yield(sf.SubFeature(sf0._type)) {
+			return
+		}
+	}
+}
+
+// Values is an iterator for range over all subfeatures and it's value.
 func (feat Feature) Values(yield func(sf.SubFeature, float64) bool) {
 	var val float64
 	var err error

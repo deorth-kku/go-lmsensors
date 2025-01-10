@@ -71,15 +71,19 @@ func TestGetChip(t *testing.T) {
 		return
 	}
 	for _, chip := range Chips {
-		nchip, err := getChip(chip.Name())
+		nchip, err := GetChip(chip.Name())
 		if err != nil {
 			t.Error(err)
 			return
 		}
+		fmt.Println(nchip.Path())
 		for _, feat := range nchip.Features {
 			for sub, val := range feat.Values {
 				fmt.Println(sub, val)
 			}
 		}
+		fmt.Println()
+		nchip.Free()
 	}
+	Cleanup()
 }
