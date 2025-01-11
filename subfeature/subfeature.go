@@ -13,7 +13,7 @@ import (
 type SubFeature uint32
 
 func (s SubFeature) Error() string {
-	return s.String()
+	return "failed when getting subfeature: " + s.String()
 }
 
 const (

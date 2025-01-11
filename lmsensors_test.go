@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"testing"
+
+	sf "github.com/mt-inside/go-lmsensors/subfeature"
 )
 
 func TestGet(t *testing.T) {
@@ -14,6 +16,7 @@ func TestGet(t *testing.T) {
 		t.Error(err)
 		return
 	}
+	defer Cleanup()
 	info, err := Get()
 	if err != nil {
 		if !errors.Is(err, ErrSensorAny) {
@@ -25,7 +28,7 @@ func TestGet(t *testing.T) {
 			t.Error(err)
 			return
 		}
-		fmt.Println(se.Code(), se.SubFeature())
+		fmt.Println(se.Code().String(), se.SubFeature().String())
 	}
 
 	encoder := json.NewEncoder(os.Stdout)
@@ -42,6 +45,7 @@ func TestChip(t *testing.T) {
 		t.Error(err)
 		return
 	}
+	defer Cleanup()
 	for no, chip := range Chips {
 		fmt.Println(no, chip.Name(), chip.Path(), chip.Prefix(), chip.Bus(), chip.Addr())
 	}
@@ -53,6 +57,7 @@ func TestFeature(t *testing.T) {
 		t.Error(err)
 		return
 	}
+	defer Cleanup()
 	for _, chip := range Chips {
 		for _, feat := range chip.Features {
 			fmt.Println(chip.Name(), chip.Path(), feat.Name(), feat.Label(), feat.Type())
@@ -70,6 +75,7 @@ func TestGetChip(t *testing.T) {
 		t.Error(err)
 		return
 	}
+	defer Cleanup()
 	for _, chip := range Chips {
 		nchip, err := GetChip(chip.Name())
 		if err != nil {
@@ -85,5 +91,31 @@ func TestGetChip(t *testing.T) {
 		fmt.Println()
 		nchip.Free()
 	}
-	Cleanup()
+
+}
+
+func TestSetValue(t *testing.T) {
+	err := Init()
+	if err != nil {
+		t.Error(err)
+		return
+	}
+	defer Cleanup()
+	for _, chip := range Chips {
+		for _, feat := range chip.Features {
+			if feat.Type() != Intrusion {
+				continue
+			}
+			err := feat.SetValue(sf.INTRUSION_ALARM, 0)
+			if err != nil {
+				t.Error(err)
+				return
+			}
+			val, err := feat.GetValue(sf.INTRUSION_ALARM)
+			if val != 0 {
+				t.Error("set failed")
+				return
+			}
+		}
+	}
 }

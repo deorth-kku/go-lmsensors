@@ -472,16 +472,28 @@ func (feat Feature) getValue(sf0 *C.struct_sensors_subfeature) (float64, error) 
 func (feat Feature) GetValue(sub sf.SubFeature) (float64, error) {
 	sf := C.sensors_get_subfeature(feat.Chip.ptr, feat.ptr, C.sensors_subfeature_type(sub))
 	if sf == nil {
-		return 0, ErrSubFeatureNotExist
+		return 0, sub
 	}
 	return feat.getValue(sf)
+}
+
+func (feat Feature) SetValue(sub sf.SubFeature, val float64) error {
+	sf0 := C.sensors_get_subfeature(feat.Chip.ptr, feat.ptr, C.sensors_subfeature_type(sub))
+	if sf0 == nil {
+		return sub
+	}
+	cerr := C.sensors_set_value(feat.Chip.ptr, sf0.number, C.double(val))
+	if cerr != 0 {
+		return setSensorErr{sensorErr{sf.SubFeature(sf0._type), cerr}}
+	}
+	return nil
 }
 
 func (feat Feature) FirstValue() (sub sf.SubFeature, val float64, err error) {
 	i := C.int(0)
 	sf0 := C.sensors_get_all_subfeatures(feat.Chip.ptr, feat.ptr, &i)
 	if sf0 == nil {
-		err = ErrSubFeatureNotExist
+		err = sub
 		return
 	}
 	sub = sf.SubFeature(sf0._type)

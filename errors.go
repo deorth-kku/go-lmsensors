@@ -18,11 +18,6 @@ type SensorErr interface {
 	Code() SensorErrCode
 }
 
-var (
-	ErrSubFeatureNotExist           = sensorErr{}
-	_                     SensorErr = ErrSubFeatureNotExist
-)
-
 // sensorErr is only allowed to create within the package, and cannot be modified.
 // To read its value, you can cast it into [SensorErr]
 type sensorErr struct {
@@ -58,11 +53,29 @@ func (s sensorErr) Is(err error) bool {
 	}
 }
 
+func (s sensorErr) Unwrap() (errs []error) {
+	if s.cerr != 0 {
+		errs = append(errs, s.Code())
+	}
+	if s.sub != 0 {
+		errs = append(errs, s.sub)
+	}
+	return
+}
+
+type setSensorErr struct {
+	sensorErr
+}
+
+func (s setSensorErr) Error() string {
+	return fmt.Sprintf("can't set sensor value: subfeature=%s, error=%s", s.sub, s.Code())
+}
+
 //go:generate stringer -type=SensorErrCode
 type SensorErrCode int32
 
 func (s SensorErrCode) Error() string {
-	return s.String()
+	return "libsensor error code=" + s.String()
 }
 
 const (
