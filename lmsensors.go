@@ -16,6 +16,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"unsafe"
@@ -393,47 +394,38 @@ func (chip ChipPtr) searchSetPath() {
 		p = p[:len(p)-1]
 		if string(p) == prefix {
 			chip.ptr.path = C.CString(filepath.Join(hwmon_dir, e.Name()))
+			runtime.AddCleanup(chip.ptr, free, chip.ptr.path)
 			break
 		}
 	}
 }
 
+func free[T any](ptr *T) {
+	C.free(unsafe.Pointer(ptr))
+}
+
 // GetChip create a [ChipPtr] from a name, as it was definded in https://github.com/lm-sensors/lm-sensors/blob/42f240d2a457834bcbdf4dc8b57237f97b5f5854/lib/data.c#L62
 // However, I prohibit wildcards here because none of the methods allow wildcards.
-// You need to call [ChipPtr.Free] only if ChipPtr is created from this function.
 func GetChip(name string) (ChipPtr, error) {
 	ch := ChipPtr{new(C.sensors_chip_name)}
 	cname := C.CString(name)
-	defer C.free(unsafe.Pointer(cname))
+	defer free(cname)
 	cerr := C.sensors_parse_chip_name(cname, ch.ptr)
 	if cerr != 0 {
-		ch.Free()
 		return ChipPtr{}, SensorErrCode(cerr)
 	}
+	runtime.AddCleanup(ch.ptr, free, ch.ptr.prefix)
 	if !ch.hasNR() {
 		ch.ptr.bus.nr = 0
 	}
 	if ch.hasWildcards() {
-		ch.Free()
 		return ChipPtr{}, ErrSensorWildcards
 	}
 	ch.searchSetPath()
 	if ch.ptr.path == nil {
-		ch.Free()
 		return ChipPtr{}, ErrSensorChipName
 	}
 	return ch, nil
-}
-
-// Free release the C memory allocated for this [ChipPtr].
-// Only call Free if a [ChipPtr] is created from [GetChip].
-func (chip ChipPtr) Free() {
-	if chip.ptr.path != nil {
-		C.free(unsafe.Pointer(chip.ptr.path))
-	}
-	if chip.ptr.prefix != nil {
-		C.free(unsafe.Pointer(chip.ptr.prefix))
-	}
 }
 
 type Feature struct {
@@ -452,7 +444,7 @@ func (feat Feature) Label() string {
 	if clabel == nil {
 		return ""
 	}
-	defer C.free(unsafe.Pointer(clabel))
+	defer free(clabel)
 	return C.GoString(clabel)
 }
 

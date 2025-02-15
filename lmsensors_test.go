@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"runtime"
 	"testing"
 
 	sf "github.com/mt-inside/go-lmsensors/subfeature"
@@ -89,9 +90,16 @@ func TestGetChip(t *testing.T) {
 			}
 		}
 		fmt.Println()
-		nchip.Free()
 	}
+}
 
+func TestGetChipInvalid(t *testing.T) {
+	_, err := GetChip("bruh")
+	if err == nil {
+		t.Error("no error when it should have")
+		return
+	}
+	runtime.GC()
 }
 
 func TestSetValue(t *testing.T) {
@@ -112,6 +120,10 @@ func TestSetValue(t *testing.T) {
 				return
 			}
 			val, err := feat.GetValue(sf.INTRUSION_ALARM)
+			if err != nil {
+				t.Error(err)
+				return
+			}
 			if val != 0 {
 				t.Error("set failed")
 				return
